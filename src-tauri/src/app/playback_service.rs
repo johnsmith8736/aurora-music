@@ -14,8 +14,10 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::domain::model::TrackId;
-use crate::domain::ports::{AudioOutput, AudioSource, Clock, EngineEvent, TransportState};
-use crate::domain::queue::{PlayQueue, QueueEntry};
+use crate::domain::ports::{
+    AudioOutput, AudioSource, Clock, EngineEvent, RandomSource, TransportState,
+};
+use crate::domain::queue::{PlayQueue, QueueEntry, RepeatMode};
 use crate::domain::{AppError, PlaybackError};
 
 /// 判定截断的最小声明时长。短于该值的曲目不参与判定 ——
@@ -80,6 +82,10 @@ pub struct PlaybackSnapshot {
     pub queue_index: Option<usize>,
     pub has_next: bool,
     pub has_previous: bool,
+    /// 循环模式。序列化为 `"off"` / `"all"` / `"one"`。
+    pub repeat: RepeatMode,
+    /// 随机播放开关。置换本身（`order`）不跨 IPC —— 前端只需要这一个布尔量。
+    pub shuffle: bool,
     pub engine: String,
     pub last_failure: Option<TrackFailure>,
 }
@@ -94,14 +100,21 @@ pub struct PlaybackService {
     engine: Arc<dyn AudioOutput>,
     #[allow(dead_code)] // 预留：播放历史需要时间戳，属下一个里程碑
     clock: Arc<dyn Clock>,
+    /// 洗牌种子来源。见 `domain/ports.rs::RandomSource`。
+    random: Arc<dyn RandomSource>,
     inner: Mutex<Inner>,
 }
 
 impl PlaybackService {
-    pub fn new(engine: Arc<dyn AudioOutput>, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(
+        engine: Arc<dyn AudioOutput>,
+        clock: Arc<dyn Clock>,
+        random: Arc<dyn RandomSource>,
+    ) -> Self {
         Self {
             engine,
             clock,
+            random,
             inner: Mutex::new(Inner {
                 queue: PlayQueue::new(),
                 volume: 1.0,
@@ -257,6 +270,20 @@ impl PlaybackService {
         Ok(())
     }
 
+    /// 设置循环模式。
+    pub fn set_repeat(&self, mode: RepeatMode) {
+        self.lock().queue.set_repeat(mode);
+    }
+
+    /// 开启或关闭随机播放。
+    ///
+    /// 种子取自 `RandomSource`。关闭时不消耗种子 —— 开关切换不该影响
+    /// 其它依赖随机序列的行为（目前没有，但保持这个性质没有成本）。
+    pub fn set_shuffle(&self, enabled: bool) {
+        let seed = if enabled { self.random.seed() } else { 0 };
+        self.lock().queue.set_shuffle(enabled, seed);
+    }
+
     // ─────────────────────────────────────────────────────────
     // 推进与状态
     // ─────────────────────────────────────────────────────────
@@ -273,6 +300,7 @@ impl PlaybackService {
             match ev {
                 EngineEvent::TrackEnded { track_id, position } => {
                     if let Some(failure) = self.check_truncation(track_id, position) {
+                        // 失败路径**一律前进**，绝不重播 —— 理由见 `replay_current`
                         out.push(PlaybackEvent::TrackFailed {
                             track_id,
                             code: failure.code.clone(),
@@ -283,7 +311,12 @@ impl PlaybackService {
                         continue;
                     }
                     out.push(PlaybackEvent::TrackEnded { track_id });
-                    out.extend(self.auto_advance());
+
+                    if self.repeat_one_active() {
+                        out.extend(self.replay_current());
+                    } else {
+                        out.extend(self.auto_advance());
+                    }
                 }
                 EngineEvent::LoadFailed { track_id, reason } => {
                     let failure = TrackFailure {
@@ -384,6 +417,52 @@ impl PlaybackService {
         out
     }
 
+    /// 单曲循环是否生效。
+    ///
+    /// 注意 `RepeatMode::One` **不影响**队列的 `advance()`/`retreat()`：
+    /// 手动点"下一首"在任何模式下都应前进，单曲循环只作用于自然结束后的续播。
+    fn repeat_one_active(&self) -> bool {
+        self.lock().queue.repeat() == RepeatMode::One
+    }
+
+    /// 重播当前曲目（单曲循环）。
+    ///
+    /// ⚠️ **只允许在自然结束时调用。** 任何失败路径都必须走 `auto_advance()`：
+    /// 一个被判定为截断的文件每次重播都会再次提前结束，若失败路径也重播，
+    /// 就会无限循环播放同一段损坏音频。`tick()` 里两条分支的划分即为此。
+    fn replay_current(&self) -> Vec<PlaybackEvent> {
+        let entry = {
+            let inner = self.lock();
+            inner.queue.current().cloned()
+        };
+        let Some(entry) = entry else {
+            // 队列空了（理论上不该发生），退回常规续播
+            return self.auto_advance();
+        };
+
+        match self.load(&entry) {
+            Ok(()) => vec![PlaybackEvent::TrackStarted {
+                track_id: entry.track_id,
+            }],
+            Err(err) => {
+                let failure = TrackFailure {
+                    track_id: entry.track_id,
+                    code: err.code().to_string(),
+                    message: err.user_message(),
+                };
+                self.lock().last_failure = Some(failure.clone());
+                let mut out = vec![PlaybackEvent::TrackFailed {
+                    track_id: failure.track_id,
+                    code: failure.code,
+                    message: failure.message,
+                }];
+                // 连当前这首都放不出来，只能往下走
+                out.extend(self.auto_advance());
+                out
+            }
+        }
+    }
+
     fn load(&self, entry: &QueueEntry) -> Result<(), AppError> {
         let source = AudioSource {
             track_id: entry.track_id,
@@ -423,6 +502,8 @@ impl PlaybackService {
             queue_index: inner.queue.current_index(),
             has_next: inner.queue.has_next(),
             has_previous: inner.queue.has_previous(),
+            repeat: inner.queue.repeat(),
+            shuffle: inner.queue.is_shuffled(),
             engine: self.engine.describe(),
             last_failure: inner.last_failure.clone(),
         }
@@ -451,6 +532,7 @@ fn is_truncated(actual: Duration, declared: Duration) -> bool {
 mod tests {
     use super::*;
     use crate::infra::audio::NullAudioEngine;
+    use crate::infra::random::FakeRandom;
     use crate::infra::time::FakeClock;
     use std::path::PathBuf;
 
@@ -472,7 +554,11 @@ mod tests {
 
     fn harness() -> Harness {
         let engine = Arc::new(NullAudioEngine::scripted());
-        let service = PlaybackService::new(engine.clone(), Arc::new(FakeClock::new(1_000_000)));
+        let service = PlaybackService::new(
+            engine.clone(),
+            Arc::new(FakeClock::new(1_000_000)),
+            Arc::new(FakeRandom::new()),
+        );
         Harness { service, engine }
     }
 
@@ -733,6 +819,178 @@ mod tests {
         assert_eq!(h.service.snapshot().status, TransportState::Stopped);
     }
 
+    // ══════════════════════════════════════════════════════════
+    // 播放模式：循环与随机
+    // ══════════════════════════════════════════════════════════
+
+    #[test]
+    fn repeat_mode_is_reflected_in_the_snapshot() {
+        let h = harness();
+        assert_eq!(h.service.snapshot().repeat, RepeatMode::Off, "默认应为顺序播放");
+
+        for mode in [RepeatMode::All, RepeatMode::One, RepeatMode::Off] {
+            h.service.set_repeat(mode);
+            assert_eq!(h.service.snapshot().repeat, mode);
+        }
+    }
+
+    #[test]
+    fn shuffle_toggle_is_reflected_in_the_snapshot_and_keeps_current_track() {
+        let h = harness();
+        h.service
+            .play_tracks(vec![entry(1, Some(1000)), entry(2, Some(1000))], 0)
+            .unwrap();
+
+        assert!(!h.service.snapshot().shuffle, "默认应关闭随机");
+        let before = h.service.snapshot().track_id;
+
+        h.service.set_shuffle(true);
+        let snap = h.service.snapshot();
+        assert!(snap.shuffle);
+        assert_eq!(snap.track_id, before, "开启随机不应打断当前曲目");
+
+        h.service.set_shuffle(false);
+        assert!(!h.service.snapshot().shuffle);
+        assert_eq!(h.service.snapshot().track_id, before);
+    }
+
+    #[test]
+    fn repeat_one_replays_the_same_track_on_natural_end() {
+        let h = harness();
+        h.service
+            .play_tracks(vec![entry(1, Some(1000)), entry(2, Some(1000))], 0)
+            .unwrap();
+        h.service.set_repeat(RepeatMode::One);
+
+        h.engine.advance(Duration::from_millis(1000));
+        let events = h.service.tick();
+
+        assert_eq!(
+            events,
+            vec![
+                PlaybackEvent::TrackEnded { track_id: 1 },
+                PlaybackEvent::TrackStarted { track_id: 1 },
+            ],
+            "单曲循环应在自然结束后重播同一首"
+        );
+        assert_eq!(h.service.snapshot().track_id, Some(1));
+        assert_eq!(h.service.snapshot().status, TransportState::Playing);
+    }
+
+    #[test]
+    fn repeat_one_manual_next_still_advances() {
+        // 单曲循环只作用于自动续播；手动"下一首"必须前进（通行约定）
+        let h = harness();
+        h.service
+            .play_tracks(vec![entry(1, Some(1000)), entry(2, Some(1000))], 0)
+            .unwrap();
+        h.service.set_repeat(RepeatMode::One);
+
+        assert_eq!(
+            h.service.next().unwrap(),
+            Some(PlaybackEvent::TrackStarted { track_id: 2 }),
+            "单曲循环下点下一首应前进，而不是重播"
+        );
+    }
+
+    /// ⚠️ 关键回归：失败路径绝不能被单曲循环接管。
+    ///
+    /// 被判定为截断的文件每次重播都会再次提前结束 —— 若失败路径也重播，
+    /// 就会无限循环播放同一段损坏音频。
+    #[test]
+    fn repeat_one_does_not_replay_a_truncated_track() {
+        let h = harness();
+        h.service
+            .play_tracks(vec![entry(1, Some(3000)), entry(2, Some(3000))], 0)
+            .unwrap();
+        h.service.set_repeat(RepeatMode::One);
+
+        h.engine.advance(Duration::from_millis(1900));
+        h.engine.finish_current();
+        let events = h.service.tick();
+
+        assert_eq!(events.len(), 2, "应为 失败事件 + 下一首：{events:?}");
+        assert!(
+            matches!(&events[0], PlaybackEvent::TrackFailed { code, .. }
+                if code == "PLAYBACK_TRUNCATED_FILE"),
+            "首事件应为截断失败：{events:?}"
+        );
+        assert_eq!(
+            events[1],
+            PlaybackEvent::TrackStarted { track_id: 2 },
+            "截断文件在单曲循环下也必须前进，不得重播"
+        );
+    }
+
+    #[test]
+    fn repeat_all_wraps_at_last_track_without_queue_finished() {
+        let h = harness();
+        h.service
+            .play_tracks(vec![entry(1, Some(1000)), entry(2, Some(1000))], 1)
+            .unwrap();
+        h.service.set_repeat(RepeatMode::All);
+
+        h.engine.advance(Duration::from_millis(1000));
+        let events = h.service.tick();
+
+        assert_eq!(
+            events,
+            vec![
+                PlaybackEvent::TrackEnded { track_id: 2 },
+                PlaybackEvent::TrackStarted { track_id: 1 },
+            ],
+            "列表循环应在末曲回到首曲，且不得发出 QueueFinished"
+        );
+        assert_eq!(h.service.snapshot().track_id, Some(1));
+    }
+
+    #[test]
+    fn repeat_all_manual_next_wraps_and_keeps_the_queue() {
+        let h = harness();
+        h.service
+            .play_tracks(vec![entry(1, Some(1000)), entry(2, Some(1000))], 1)
+            .unwrap();
+        h.service.set_repeat(RepeatMode::All);
+
+        assert_eq!(
+            h.service.next().unwrap(),
+            Some(PlaybackEvent::TrackStarted { track_id: 1 })
+        );
+
+        let snap = h.service.snapshot();
+        assert_eq!(snap.queue_length, 2, "列表循环下环绕不得清空队列");
+        assert!(snap.has_next, "列表循环下任何位置都应有下一首");
+        assert!(snap.has_previous, "列表循环下任何位置都应有上一首");
+    }
+
+    /// 无界环绕 + 全部加载失败 = 死循环。装载预算必须仍然有限。
+    #[test]
+    fn repeat_all_with_all_tracks_broken_still_terminates() {
+        let h = harness();
+        h.service
+            .play_tracks(vec![entry(1, Some(1000)), entry(2, Some(1000))], 0)
+            .unwrap();
+        h.service.set_repeat(RepeatMode::All);
+
+        h.engine.advance(Duration::from_millis(1000));
+        h.engine.fail_every_load("坏");
+        let events = h.service.tick();
+
+        assert!(
+            matches!(events.last(), Some(PlaybackEvent::QueueFinished)),
+            "列表循环 + 全损坏队列也必须终止：{events:?}"
+        );
+
+        // 环绕不得让尝试次数失控：预算恒等于队列长度
+        let attempts = events
+            .iter()
+            .filter(|e| matches!(e, PlaybackEvent::TrackFailed { .. }))
+            .count();
+        assert_eq!(attempts, 2, "尝试次数必须等于队列长度：{events:?}");
+
+        assert_eq!(h.service.snapshot().status, TransportState::Stopped);
+    }
+
     #[test]
     fn volume_is_clamped_and_reported() {
         let h = harness();
@@ -796,7 +1054,11 @@ mod tests {
     #[test]
     fn unavailable_engine_surfaces_no_output_device() {
         let engine = Arc::new(NullAudioEngine::unavailable());
-        let service = PlaybackService::new(engine, Arc::new(FakeClock::new(0)));
+        let service = PlaybackService::new(
+            engine,
+            Arc::new(FakeClock::new(0)),
+            Arc::new(FakeRandom::new()),
+        );
 
         let err = service.play_tracks(vec![entry(1, Some(1000))], 0).unwrap_err();
         assert_eq!(err.code(), "PLAYBACK_NO_OUTPUT_DEVICE");

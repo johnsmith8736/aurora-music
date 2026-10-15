@@ -8,6 +8,7 @@
 
 pub mod library;
 pub mod playback;
+pub mod queue;
 
 use crate::domain::{AppError, ErrorPayload};
 

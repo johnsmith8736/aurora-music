@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::app::library_service::{self, LibraryStats, ScanSummary};
 use crate::app::AppState;
-use crate::domain::model::{LibraryRoot, RootId, Track};
+use crate::domain::model::{LibraryRoot, RootId, Track, TrackId};
 use crate::domain::ErrorPayload;
 
 /// 添加一个音乐目录。路径会被规范化为绝对路径。
@@ -58,4 +58,16 @@ pub async fn library_list_tracks(
 pub async fn library_stats(state: State<'_, AppState>) -> Result<LibraryStats, ErrorPayload> {
     let pool = state.pool.clone();
     super::blocking(move || library_service::stats(&pool)).await
+}
+
+/// 按 ID 取单曲完整元数据，供"正在播放"界面使用。
+///
+/// 曲目不存在时返回 `LIBRARY_TRACK_NOT_FOUND`。
+#[tauri::command]
+pub async fn library_get_track(
+    state: State<'_, AppState>,
+    track_id: TrackId,
+) -> Result<Track, ErrorPayload> {
+    let pool = state.pool.clone();
+    super::blocking(move || library_service::get_track(&pool, track_id)).await
 }

@@ -2,8 +2,15 @@ import { useCallback, useRef } from "react";
 
 import { formatDuration } from "../lib/format";
 import type { PlayerController } from "../state/player";
+import { RepeatToggle, ShuffleToggle } from "./PlayModeToggles";
 
-export function PlayerBar({ player }: { player: PlayerController }) {
+interface Props {
+  player: PlayerController;
+  /** 点击左侧曲目信息 → 主内容区切到播放界面。 */
+  onOpenNowPlaying: () => void;
+}
+
+export function PlayerBar({ player, onOpenNowPlaying }: Props) {
   const { snapshot, error, clearError } = player;
 
   const status = snapshot?.status ?? "idle";
@@ -46,12 +53,22 @@ export function PlayerBar({ player }: { player: PlayerController }) {
 
   return (
     <footer className="playerbar" aria-label="播放控制">
-      {/* ── 当前曲目 ─────────────────────────────────────── */}
-      <div className="player-now">
-        <div className="player-art" aria-hidden="true">
+      {/* ── 当前曲目（点击进入播放界面） ─────────────────── */}
+      <button
+        className="player-now"
+        onClick={onOpenNowPlaying}
+        disabled={!hasTrack}
+        title={hasTrack ? "查看播放详情" : undefined}
+        aria-label={
+          hasTrack
+            ? `${snapshot?.title ?? "当前曲目"}，查看播放详情`
+            : "当前没有正在播放的曲目"
+        }
+      >
+        <span className="player-art" aria-hidden="true">
           {isPlaying ? "♫" : "♪"}
-        </div>
-        <div className="player-meta">
+        </span>
+        <span className="player-meta">
           <span className={`player-title${hasTrack ? "" : " dim"}`}>
             {snapshot?.title ?? "未在播放"}
           </span>
@@ -60,12 +77,14 @@ export function PlayerBar({ player }: { player: PlayerController }) {
               ? (snapshot?.artist ?? "未知艺术家")
               : "从资料库中选择一首曲目开始播放"}
           </span>
-        </div>
-      </div>
+        </span>
+      </button>
 
       {/* ── 传输控制 ─────────────────────────────────────── */}
       <div className="player-center">
         <div className="player-controls">
+          <ShuffleToggle player={player} />
+
           <button
             className="ctrl"
             onClick={() => void player.previous()}
@@ -105,6 +124,8 @@ export function PlayerBar({ player }: { player: PlayerController }) {
           >
             ⏹
           </button>
+
+          <RepeatToggle player={player} />
         </div>
 
         <div className="player-progress">

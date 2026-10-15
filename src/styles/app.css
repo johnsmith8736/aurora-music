@@ -91,14 +91,6 @@ input:focus-visible,
   padding: var(--space-5) var(--space-4) var(--space-4);
 }
 
-.brand-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--accent), #818cf8);
-  flex-shrink: 0;
-}
-
 .brand-name {
   font-size: var(--text-lg);
   font-weight: 600;
@@ -637,6 +629,26 @@ input:focus-visible,
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+  /* 这是个 <button>：重置文字对齐并给出可点击反馈。
+     内边距用等量负 margin 抵消，避免播放栏布局位移。 */
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  margin: calc(var(--space-1) * -1) calc(var(--space-2) * -1);
+  border-radius: var(--radius-md);
+  transition: background var(--transition);
+}
+
+.player-now:not(:disabled):hover {
+  background: var(--surface-2);
+}
+
+.player-now:disabled {
+  cursor: default;
+}
+
+/* 覆盖全局 button:focus-visible 的 radius-sm，避免聚焦时圆角跳变 */
+.player-now:focus-visible {
+  border-radius: var(--radius-md);
 }
 
 .player-art {
@@ -732,6 +744,40 @@ input:focus-visible,
   background: var(--surface-3);
   color: var(--text-faint);
   opacity: 0.5;
+}
+
+/* ── 播放模式开关（随机 / 循环） ────────────────────────── */
+
+.ctrl-toggle {
+  position: relative;
+}
+
+/* 开启态：着色 + 圆点。圆点是必需的 —— NFR-5.4 不允许颜色单独传达状态，
+   而"顺序播放"与"列表循环"用的是同一个字形 ⟳。 */
+.ctrl[aria-pressed="true"] {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.ctrl[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  /* currentColor = 上面的 --accent */
+  background: currentColor;
+}
+
+/* 必须覆盖基础 .ctrl:hover 的 --surface-3 灰底 ——
+   否则鼠标移上去时开启态会看起来像被关掉了。
+   这里的选择器权重 (0,4,0) 高于 .ctrl:hover:not(:disabled) 的 (0,3,0)。 */
+.ctrl[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--accent-subtle);
+  color: var(--accent-hover);
 }
 
 .player-progress {
@@ -856,4 +902,181 @@ input:focus-visible,
   min-width: 40px;
   text-align: right;
   flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════════════════════
+   播放界面（主内容区，非浮层）
+   ══════════════════════════════════════════════════════════ */
+
+.nowplaying {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-top: var(--space-5);
+}
+
+.nowplaying-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* 复用 .section-heading 的排版，去掉它为侧栏调过的内边距 */
+.nowplaying .section-heading {
+  padding: 0;
+  justify-content: flex-start;
+}
+
+/* ── 主体：封面位 + 曲目信息 ───────────────────────────── */
+
+.nowplaying-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-5);
+}
+
+/* FR-7（M3）实现封面后，此块将被真实图片替换 */
+.nowplaying-art {
+  width: 240px;
+  height: 240px;
+  flex-shrink: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface-3);
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  font-size: 72px;
+}
+
+.nowplaying-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.nowplaying-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.nowplaying-artist {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.nowplaying-album {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+.nowplaying-warn {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--warning);
+}
+
+/* ── 进度与传输 ────────────────────────────────────────── */
+
+.nowplaying-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  align-self: center;
+  width: 100%;
+  max-width: 640px;
+  min-width: 0;
+}
+
+.nowplaying-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+/* ── 元数据 ────────────────────────────────────────────── */
+
+.nowplaying-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.nowplaying-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.nowplaying-rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nowplaying-row {
+  display: grid;
+  grid-template-columns: 128px 1fr;
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+}
+
+.nowplaying-label {
+  color: var(--text-faint);
+}
+
+.nowplaying-value {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 无曲目 ────────────────────────────────────────────── */
+
+.nowplaying-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.nowplaying-empty-mark {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  font-size: 30px;
+}
+
+.nowplaying-empty-text {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-dim);
+}
+
+.nowplaying-empty-hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
 }

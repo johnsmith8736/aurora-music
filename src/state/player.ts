@@ -18,8 +18,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-import { AppError, onPlaybackEvent, onPlaybackState, playback } from "../ipc/client";
-import type { PlaybackEvent, PlaybackSnapshot } from "../ipc/types";
+import {
+  AppError,
+  onPlaybackEvent,
+  onPlaybackState,
+  playback,
+  queue,
+} from "../ipc/client";
+import type { PlaybackEvent, PlaybackSnapshot, RepeatMode } from "../ipc/types";
 
 export interface PlayerController {
   snapshot: PlaybackSnapshot | null;
@@ -34,6 +40,10 @@ export interface PlayerController {
   seek: (positionMs: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   playTracks: (trackIds: number[], startIndex: number) => Promise<void>;
+  /** 设置循环模式。模式本身不在这里保存 —— 由 Rust 持有并经快照回传。 */
+  setRepeat: (mode: RepeatMode) => Promise<void>;
+  /** 开关随机播放。 */
+  setShuffle: (enabled: boolean) => Promise<void>;
   playingTrackId: number | null;
 }
 
@@ -107,6 +117,16 @@ export function usePlayer(): PlayerController {
     [run],
   );
 
+  const setRepeat = useCallback(
+    (mode: RepeatMode) => run(() => queue.setRepeat(mode)),
+    [run],
+  );
+
+  const setShuffle = useCallback(
+    (enabled: boolean) => run(() => queue.setShuffle(enabled)),
+    [run],
+  );
+
   return {
     snapshot,
     lastEvent,
@@ -119,6 +139,8 @@ export function usePlayer(): PlayerController {
     seek,
     setVolume,
     playTracks,
+    setRepeat,
+    setShuffle,
     playingTrackId: snapshot?.trackId ?? null,
   };
 }

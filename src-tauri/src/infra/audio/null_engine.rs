@@ -46,6 +46,11 @@ struct Inner {
     events: Vec<EngineEvent>,
     /// 测试注入：让下一次 load 失败，用于验证错误路径
     next_load_failure: Option<String>,
+    /// 测试注入：让**每一次** load 都失败。
+    ///
+    /// 与一次性的 `next_load_failure` 相对：用于验证"整个队列都不可播"时
+    /// 循环预算是否仍然有限 —— 一次性注入无法表达这种情形。
+    persistent_load_failure: Option<String>,
 }
 
 pub struct NullAudioEngine {
@@ -65,6 +70,7 @@ impl NullAudioEngine {
                 volume: 1.0,
                 events: Vec::new(),
                 next_load_failure: None,
+                persistent_load_failure: None,
             }),
         }
     }
@@ -139,6 +145,14 @@ impl NullAudioEngine {
         self.lock().next_load_failure = Some(reason.into());
     }
 
+    /// 让**每一次**后续 `load_and_play` 都失败，直到再次调用本方法覆盖。
+    ///
+    /// 用于构造"整个队列都不可播"的场景：验证自动续播的尝试次数上限
+    /// 在环绕模式下依然有限，不会死循环。
+    pub fn fail_every_load(&self, reason: impl Into<String>) {
+        self.lock().persistent_load_failure = Some(reason.into());
+    }
+
     /// 当前模拟位置，供断言使用。
     pub fn simulated_position(&self) -> Duration {
         self.lock().position
@@ -151,6 +165,13 @@ impl AudioOutput for NullAudioEngine {
 
         if inner.mode == Mode::Unavailable {
             return Err(PlaybackError::NoOutputDevice);
+        }
+
+        if let Some(reason) = inner.persistent_load_failure.clone() {
+            return Err(PlaybackError::DecodeFailed {
+                track_id: source.track_id,
+                reason,
+            });
         }
 
         if let Some(reason) = inner.next_load_failure.take() {

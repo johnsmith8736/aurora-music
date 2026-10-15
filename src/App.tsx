@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EmptyState, StatusBanner } from "./components/Feedback";
+import { NowPlaying } from "./components/NowPlaying";
 import { PlayerBar } from "./components/PlayerBar";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -22,6 +23,14 @@ interface Notice {
   errors?: FileError[];
 }
 
+/**
+ * 主内容区的当前视图。
+ *
+ * 这是**前端持有**的状态，不进 Rust 侧 —— `docs/architecture.md` 已约定
+ * "当前视图、滚动位置、面板开关"由前端管理。
+ */
+type View = "library" | "nowPlaying";
+
 export default function App() {
   const [roots, setRoots] = useState<LibraryRoot[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -30,6 +39,7 @@ export default function App() {
   const [busyLabel, setBusyLabel] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [booted, setBooted] = useState(false);
+  const [view, setView] = useState<View>("library");
 
   // 播放状态由 Rust 持有，这里只是它的镜像
   const player = usePlayer();
@@ -194,6 +204,11 @@ export default function App() {
     [roots, reloadRoots, reloadTracks, reportError],
   );
 
+  // 视图切换回调必须保持稳定引用：它们是 NowPlaying 里 Esc 监听的依赖项，
+  // 若每次渲染都新建，播放中（约 5 Hz 重渲染）监听器会被反复注销再注册。
+  const openLibrary = useCallback(() => setView("library"), []);
+  const openNowPlaying = useCallback(() => setView("nowPlaying"), []);
+
   // ── 渲染 ────────────────────────────────────────────────
 
   const trackCount = tracks.length;
@@ -204,6 +219,8 @@ export default function App() {
         roots={roots}
         trackCount={trackCount}
         busy={busy}
+        view={view}
+        onOpenLibrary={openLibrary}
         onAddRoot={() => void handleAddRoot()}
         onRemoveRoot={(id) => void handleRemoveRoot(id)}
         onRescan={handleRescan}
@@ -232,20 +249,24 @@ export default function App() {
             </StatusBanner>
           )}
 
-          <TrackListOrEmpty
-            booted={booted}
-            tracks={tracks}
-            search={search}
-            hasRoots={roots.length > 0}
-            onAddRoot={() => void handleAddRoot()}
-            playingTrackId={player.playingTrackId}
-            isPlaying={player.snapshot?.status === "playing"}
-            onPlay={(ids, start) => void player.playTracks(ids, start)}
-          />
+          {view === "nowPlaying" ? (
+            <NowPlaying player={player} onBack={openLibrary} />
+          ) : (
+            <TrackListOrEmpty
+              booted={booted}
+              tracks={tracks}
+              search={search}
+              hasRoots={roots.length > 0}
+              onAddRoot={() => void handleAddRoot()}
+              playingTrackId={player.playingTrackId}
+              isPlaying={player.snapshot?.status === "playing"}
+              onPlay={(ids, start) => void player.playTracks(ids, start)}
+            />
+          )}
         </div>
       </main>
 
-      <PlayerBar player={player} />
+      <PlayerBar player={player} onOpenNowPlaying={openNowPlaying} />
     </div>
   );
 }

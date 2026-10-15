@@ -16,6 +16,7 @@ import type {
   LibraryStats,
   PlaybackEvent,
   PlaybackSnapshot,
+  RepeatMode,
   ScanSummary,
   Track,
 } from "./types";
@@ -90,6 +91,12 @@ export const api = {
       limit: limit ?? null,
     }),
 
+  /**
+   * 按 ID 取单曲完整元数据，供"正在播放"界面使用。
+   * 曲目不存在时抛 `AppError`，`code === "LIBRARY_TRACK_NOT_FOUND"`。
+   */
+  getTrack: (trackId: number) => call<Track>("library_get_track", { trackId }),
+
   stats: () => call<LibraryStats>("library_stats"),
 };
 
@@ -132,6 +139,22 @@ export const playback = {
     call<void>("playback_set_volume", { volume: Math.min(1, Math.max(0, volume)) }),
 
   getState: () => call<PlaybackSnapshot>("playback_get_state"),
+};
+
+// ══════════════════════════════════════════════════════════════
+// 队列（播放模式）
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 播放模式只有 setter —— 状态由 Rust 持有，读回统一走 `playback.getState()`。
+ * 这样"Rust 是唯一真相源"不会因为多了个读接口而被绕过。
+ */
+export const queue = {
+  setRepeat: (mode: RepeatMode) => call<void>("queue_set_repeat", { mode }),
+
+  /** 开启时会生成一份固定置换（FR-3.5），不打断当前曲目。 */
+  setShuffle: (enabled: boolean) =>
+    call<void>("queue_set_shuffle", { enabled }),
 };
 
 // ══════════════════════════════════════════════════════════════

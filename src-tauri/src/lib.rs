@@ -68,7 +68,8 @@ fn setup_app(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // 打不开真实音频设备时会降级到静默引擎，而不是让应用启动失败
     let engine = infra::audio::open_best_engine();
     let clock: Arc<dyn domain::ports::Clock> = Arc::new(infra::time::SystemClock);
-    let playback = Arc::new(PlaybackService::new(engine, clock));
+    let random: Arc<dyn domain::ports::RandomSource> = Arc::new(infra::random::SystemRandom);
+    let playback = Arc::new(PlaybackService::new(engine, clock, random));
 
     spawn_playback_pump(app.clone(), playback.clone());
 
@@ -92,6 +93,7 @@ pub fn run() {
             commands::library::library_remove_root,
             commands::library::library_scan_root,
             commands::library::library_list_tracks,
+            commands::library::library_get_track,
             commands::library::library_stats,
             // 播放
             commands::playback::playback_play_tracks,
@@ -102,6 +104,9 @@ pub fn run() {
             commands::playback::playback_seek,
             commands::playback::playback_set_volume,
             commands::playback::playback_get_state,
+            // 队列（播放模式）
+            commands::queue::queue_set_repeat,
+            commands::queue::queue_set_shuffle,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");

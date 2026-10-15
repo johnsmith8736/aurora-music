@@ -16,6 +16,7 @@ use std::sync::Arc;
 use aurora_music_lib::app::{AppState, PlaybackService};
 use aurora_music_lib::infra::audio::NullAudioEngine;
 use aurora_music_lib::infra::db::{self, DbPool};
+use aurora_music_lib::infra::random::FakeRandom;
 use aurora_music_lib::infra::time::FakeClock;
 use serde_json::{json, Value};
 use tauri::ipc::{CallbackFn, InvokeBody};
@@ -30,6 +31,7 @@ fn silent_playback() -> Arc<PlaybackService> {
     Arc::new(PlaybackService::new(
         Arc::new(NullAudioEngine::scripted()),
         Arc::new(FakeClock::new(1_000_000)),
+        Arc::new(FakeRandom::new()),
     ))
 }
 
@@ -42,6 +44,7 @@ fn build_app(pool: DbPool) -> App {
             aurora_music_lib::commands::library::library_remove_root,
             aurora_music_lib::commands::library::library_scan_root,
             aurora_music_lib::commands::library::library_list_tracks,
+            aurora_music_lib::commands::library::library_get_track,
             aurora_music_lib::commands::library::library_stats,
             aurora_music_lib::commands::playback::playback_play_tracks,
             aurora_music_lib::commands::playback::playback_toggle,
@@ -51,6 +54,8 @@ fn build_app(pool: DbPool) -> App {
             aurora_music_lib::commands::playback::playback_seek,
             aurora_music_lib::commands::playback::playback_set_volume,
             aurora_music_lib::commands::playback::playback_get_state,
+            aurora_music_lib::commands::queue::queue_set_repeat,
+            aurora_music_lib::commands::queue::queue_set_shuffle,
         ])
         .build(tauri::generate_context!())
         .expect("构建测试应用")
@@ -259,6 +264,58 @@ fn scanning_the_same_library_twice_over_ipc_is_incremental() {
     assert_eq!(tracks.as_array().unwrap().len(), 4, "不得产生重复行");
 }
 
+/// 单曲查询：正常路径取回完整元数据，不存在的 id 回结构化错误。
+///
+/// 这条命令服务于"正在播放"界面 —— 它需要 codec / 采样率 / 文件体积 /
+/// 入库时间等字段，而 `PlaybackSnapshot` 里没有这些。
+#[test]
+fn get_track_returns_full_metadata_and_reports_missing_ids() {
+    let h = harness();
+
+    let root_id = invoke(
+        &h.webview,
+        "library_add_root",
+        json!({ "path": fixtures_dir().to_str().unwrap() }),
+    )
+    .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    invoke(&h.webview, "library_scan_root", json!({ "rootId": root_id })).unwrap();
+
+    let listed = invoke(&h.webview, "library_list_tracks", json!({ "limit": 100 })).unwrap();
+    let from_list = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["path"].as_str().unwrap().ends_with("tagged.mp3"))
+        .expect("夹具应包含 tagged.mp3")
+        .clone();
+    let id = from_list["id"].as_i64().unwrap();
+
+    // ── 1. 单曲查询必须与列表条目逐字段一致 ─────────────────────
+    let one = invoke(&h.webview, "library_get_track", json!({ "trackId": id }))
+        .expect("library_get_track 应成功");
+    assert_eq!(one, from_list, "单曲查询结果必须与列表条目一致");
+
+    // 这些技术字段是详情界面独有依赖，必须有真实值
+    assert_eq!(one["title"], "Fixture MP3");
+    assert_eq!(one["sampleRate"], 8000);
+    assert_eq!(one["channels"], 1);
+    assert_eq!(one["trackNo"], 3);
+    assert_eq!(one["albumArtist"], "Fixture Album Artist");
+    assert!(one["fileSize"].as_i64().unwrap() > 0, "文件体积应为真实值");
+    assert!(one["addedAt"].as_i64().unwrap() > 0, "入库时间应为真实值");
+
+    // ── 2. 不存在的 id → 结构化错误，不是 panic 也不是字符串 ─────
+    let err = invoke(&h.webview, "library_get_track", json!({ "trackId": 999_999 }))
+        .expect_err("不存在的曲目必须报错");
+    assert_eq!(err["code"], "LIBRARY_TRACK_NOT_FOUND");
+    assert_eq!(err["retryable"], false);
+    assert_eq!(keys_of(&err), ["code", "message", "retryable"]);
+
+    let _ = &h.app;
+}
+
 fn keys_of(value: &Value) -> Vec<String> {
     let mut k: Vec<String> = value
         .as_object()
@@ -324,6 +381,8 @@ fn playback_state_shape_is_stable() {
             "positionMs",
             "queueIndex",
             "queueLength",
+            "repeat",
+            "shuffle",
             "status",
             "title",
             "trackId",
@@ -340,6 +399,42 @@ fn playback_state_shape_is_stable() {
         state["engine"].as_str().is_some_and(|e| !e.is_empty()),
         "必须报告引擎描述，便于诊断"
     );
+}
+
+/// 播放模式经真实 IPC 往返：`queue_set_*` 写入 → `playback_get_state` 读回。
+#[test]
+fn playback_modes_round_trip_over_ipc() {
+    let h = harness();
+
+    // 默认值
+    let state = invoke(&h.webview, "playback_get_state", json!({})).unwrap();
+    assert_eq!(state["repeat"], "off", "默认应为顺序播放");
+    assert_eq!(state["shuffle"], false, "默认应关闭随机");
+
+    // 循环模式三态往返
+    for mode in ["all", "one", "off"] {
+        invoke(&h.webview, "queue_set_repeat", json!({ "mode": mode }))
+            .unwrap_or_else(|e| panic!("queue_set_repeat({mode}) 应成功: {e}"));
+        let state = invoke(&h.webview, "playback_get_state", json!({})).unwrap();
+        assert_eq!(state["repeat"], mode, "循环模式应往返一致");
+    }
+
+    // 随机开关往返
+    for enabled in [true, false, true] {
+        invoke(&h.webview, "queue_set_shuffle", json!({ "enabled": enabled }))
+            .unwrap_or_else(|e| panic!("queue_set_shuffle({enabled}) 应成功: {e}"));
+        let state = invoke(&h.webview, "playback_get_state", json!({})).unwrap();
+        assert_eq!(state["shuffle"], enabled, "随机开关应往返一致");
+    }
+
+    // 非法模式必须被拒绝，而不是静默降级为 off
+    let err = invoke(&h.webview, "queue_set_repeat", json!({ "mode": "bogus" }))
+        .expect_err("非法循环模式必须被拒绝");
+    assert!(!err.is_null(), "应返回结构化错误而非空值");
+    let state = invoke(&h.webview, "playback_get_state", json!({})).unwrap();
+    assert_eq!(state["repeat"], "off", "被拒绝的调用不得改变已有模式");
+
+    let _ = &h.app;
 }
 
 #[test]

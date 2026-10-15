@@ -82,6 +82,17 @@ export type TransportStatus =
   | "stopped"
   | "error";
 
+/**
+ * 循环模式。
+ *
+ * 与 Rust `RepeatMode` 一一对应（`#[serde(rename_all = "lowercase")]`）。
+ *
+ * - `off` —— 顺序播放，队列播完即停
+ * - `all` —— 列表循环，末曲之后回到首曲
+ * - `one` —— 单曲循环，自然结束后重播同一首（手动"下一首"仍然前进）
+ */
+export type RepeatMode = "off" | "all" | "one";
+
 /** 最近一次曲目级失败。 */
 export interface TrackFailure {
   trackId: number;
@@ -108,6 +119,10 @@ export interface PlaybackSnapshot {
   queueIndex: number | null;
   hasNext: boolean;
   hasPrevious: boolean;
+  /** 循环模式 */
+  repeat: RepeatMode;
+  /** 随机播放开关。置换顺序由 Rust 持有，不跨 IPC */
+  shuffle: boolean;
   /** 音频引擎描述，用于诊断 */
   engine: string;
   lastFailure: TrackFailure | null;

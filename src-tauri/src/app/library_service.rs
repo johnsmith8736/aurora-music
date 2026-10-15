@@ -180,6 +180,17 @@ pub fn list_tracks(pool: &DbPool, query: Option<&str>, limit: i64) -> Result<Vec
     Ok(repo::list_tracks(&c, query, limit)?)
 }
 
+/// 按 ID 取单曲的完整元数据。
+///
+/// 与 `load_queue_entries` 保持一致，**不过滤 `missing_since`**：软删除
+/// （文件已从磁盘消失、数据库行仍在）的曲目照样返回。
+/// 若在此处加过滤，会出现"能播放却查不到详情"的不一致 ——
+/// 播放路径解析 ID 时走的同样是 `repo::get_track`。
+pub fn get_track(pool: &DbPool, id: TrackId) -> Result<Track, AppError> {
+    let c = conn(pool)?;
+    repo::get_track(&c, id)?.ok_or(AppError::Library(LibraryError::TrackNotFound { id }))
+}
+
 pub fn stats(pool: &DbPool) -> Result<LibraryStats, AppError> {
     let c = conn(pool)?;
     Ok(LibraryStats {

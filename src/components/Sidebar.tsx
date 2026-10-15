@@ -5,6 +5,12 @@ interface Props {
   roots: LibraryRoot[];
   trackCount: number;
   busy: boolean;
+  /**
+   * 当前主内容区视图。与 `App.tsx` 的 `View` 是同一联合类型；
+   * 此处内联而非导入，避免组件反向依赖 `App`。若两处漂移，tsc 会报错。
+   */
+  view: "library" | "nowPlaying";
+  onOpenLibrary: () => void;
   onAddRoot: () => void;
   onRemoveRoot: (rootId: number) => void;
   onRescan: (rootId: number) => void;
@@ -14,6 +20,8 @@ export function Sidebar({
   roots,
   trackCount,
   busy,
+  view,
+  onOpenLibrary,
   onAddRoot,
   onRemoveRoot,
   onRescan,
@@ -21,12 +29,15 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark" aria-hidden="true" />
         <span className="brand-name">Aurora Music</span>
       </div>
 
       <nav className="nav" aria-label="主导航">
-        <button className="nav-item" aria-current="true">
+        <button
+          className="nav-item"
+          aria-current={view === "library" ? "true" : undefined}
+          onClick={onOpenLibrary}
+        >
           <span className="nav-icon" aria-hidden="true">
             ♪
           </span>

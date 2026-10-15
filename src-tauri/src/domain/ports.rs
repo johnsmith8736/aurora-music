@@ -101,6 +101,17 @@ pub trait Clock: Send + Sync {
     fn now_unix(&self) -> i64;
 }
 
+/// 随机源端口。
+///
+/// 与 `Clock` 同理：存在的唯一目的，是让依赖随机数的逻辑在测试中可以
+/// 确定性地复现。**`domain/` 与 `app/` 中禁止直接读取系统随机源。**
+///
+/// 目前唯一的用途是给随机播放的置换提供种子（FR-3.5）。
+pub trait RandomSource: Send + Sync {
+    /// 生成一个洗牌种子。
+    fn seed(&self) -> u64;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

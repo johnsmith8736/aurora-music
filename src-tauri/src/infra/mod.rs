@@ -6,5 +6,6 @@
 
 pub mod audio;
 pub mod db;
+pub mod random;
 pub mod scan;
 pub mod time;
