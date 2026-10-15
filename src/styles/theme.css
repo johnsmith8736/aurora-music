@@ -1,0 +1,86 @@
+/**
+ * 主题 token。
+ *
+ * 全部颜色、间距、圆角、层级集中在此，组件只引用变量，
+ * 便于后续接入 KDE Plasma 配色方案（roadmap M6）。
+ */
+
+:root {
+  /* ── 表面层级（越靠上越亮）────────────────────────────── */
+  --bg: #0b0b0f;
+  --surface-1: #121217;
+  --surface-2: #17171e;
+  --surface-3: #1e1e27;
+  --surface-hover: #22222c;
+  --surface-active: #2a2a36;
+
+  /* ── 描边 ─────────────────────────────────────────────── */
+  --border: #26262f;
+  --border-strong: #34343f;
+
+  /* ── 文字 ─────────────────────────────────────────────── */
+  --text: #f3f3f6;
+  --text-dim: #a1a1b0;
+  --text-faint: #6c6c7d;
+  --text-inverse: #0b0b0f;
+
+  /* ── 强调色（极光青绿）────────────────────────────────── */
+  --accent: #5eead4;
+  --accent-hover: #7df0de;
+  --accent-dim: #2d8b7f;
+  --accent-subtle: rgba(94, 234, 212, 0.12);
+  --accent-ring: rgba(94, 234, 212, 0.35);
+
+  /* ── 语义色 ───────────────────────────────────────────── */
+  --danger: #f87171;
+  --danger-subtle: rgba(248, 113, 113, 0.12);
+  --warning: #fbbf24;
+  --warning-subtle: rgba(251, 191, 36, 0.12);
+  --success: #4ade80;
+
+  /* ── 圆角 ─────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* ── 间距 ─────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* ── 字体 ─────────────────────────────────────────────── */
+  --font-sans:
+    "Inter", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+
+  /* ── 层级 ─────────────────────────────────────────────── */
+  --z-sidebar: 10;
+  --z-player: 20;
+  --z-overlay: 30;
+  --z-toast: 40;
+
+  /* ── 其他 ─────────────────────────────────────────────── */
+  --sidebar-width: 232px;
+  --player-height: 76px;
+  --row-height: 44px;
+  --transition: 120ms ease;
+}
+
+/* 尊重系统的"减少动态效果"偏好（NFR-5.6） */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition: 0ms;
+  }
+}

@@ -1,0 +1,44 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ─────────────────────────────────────────────────────────────
+# Aurora Music 项目补充
+#
+# 上方为 Vite / Tauri 脚手架默认规则。经检查，它们已正确覆盖本项目
+# 的全部构建产物与依赖目录：
+#   node_modules/            (91 MB)
+#   dist/                    (268 KB)
+#   src-tauri/target/        (13 GB —— 最关键的一项)
+#   src-tauri/gen/schemas/   （由 src-tauri/.gitignore 覆盖）
+#
+# 以下为本项目特有的补充规则。原有内容一律保留。
+# ─────────────────────────────────────────────────────────────
+
+# Claude Code 的机器本地配置：含本地路径与权限授予，不应共享
+.claude/settings.local.json
+
+# 其他平台的文件系统元数据（本项目面向 Linux，但避免跨平台协作时误提交）
+Thumbs.db
+.directory
