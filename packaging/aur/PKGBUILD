@@ -18,6 +18,23 @@
 # 内嵌前端资源还是加载开发服务器地址（见 tauri/build.rs: `let dev = !custom_protocol`）。
 # 只有 tauri CLI 会传入该特性。用 cargo 直接构建（即使加 --release）产出的
 # 二进制会在启动时尝试连接 localhost:1420 并失败。
+#
+# ── 为什么必须 `options=(!lto)` ─────────────────────────────────────
+#
+# makepkg 的 lto 选项会把 $LTOFLAGS（-flto=auto）追加进 CFLAGS、CXXFLAGS 和
+# LDFLAGS（见 /usr/share/makepkg/buildenv/lto.sh）。于是 cc crate 在编译
+# vendored 的 sqlite3.c 时产出的是 **GCC 的 GIMPLE 中间表示**
+# （目标文件里全是 .gnu.lto_* 段），而不是本机代码。
+#
+# 而 rustc 在 x86_64-unknown-linux-gnu 上用的链接器是 LLVM 系的 rust-lld，
+# 它读不懂 GCC 的 LTO 格式（那要靠 ld.bfd 加 liblto_plugin）。结果就是
+# sqlite3 的全部符号在最终链接时变成 undefined：
+#
+#     rust-lld: error: undefined symbol: sqlite3_errcode
+#     rust-lld: error: undefined symbol: sqlite3_keyword_check
+#
+# 关掉 makepkg 层面的 LTO 即可。Rust 侧的 LTO 由 Cargo profile 控制，
+# 不受此选项影响。
 
 pkgname=aurora-music
 pkgver=0.1.0
@@ -26,6 +43,10 @@ pkgdesc="本地音乐播放器，基于 Tauri 2 + Rust + React"
 arch=('x86_64')
 url="https://github.com/johnsmith8736/aurora-music"
 license=('GPL-3.0-only')
+
+# 见文件头「为什么必须 options=(!lto)」——不是偷懒，是 LTO 会让 vendored
+# sqlite3.c 变成 rust-lld 无法链接的格式。
+options=(!lto)
 
 # 依据构建产物 `readelf -d ... | grep NEEDED` 的直接依赖得出，
 # 另加桌面集成所需的 desktop-file-utils 与 hicolor-icon-theme。

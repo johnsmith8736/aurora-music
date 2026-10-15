@@ -22,6 +22,7 @@ pkgbase = aurora-music
 	depends = libsoup3
 	depends = pango
 	depends = webkit2gtk-4.1
+	options = !lto
 	source = aurora-music::git+https://github.com/johnsmith8736/aurora-music.git#tag=v0.1.0
 	sha256sums = SKIP
 
