@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Aurora Music
+GenericName=Music Player
+Comment=本地音乐播放器
+Exec=aurora-music
+Icon=aurora-music
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupNotify=true
+StartupWMClass=aurora-music
